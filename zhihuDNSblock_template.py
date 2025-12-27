@@ -15,69 +15,70 @@ from typing import List, Dict, Any, Optional
 import google.generativeai as genai
 import platform
 
-class Config:
+class Config_temp(apikey):
     # --- 基础配置 ---
-    API_KEY = "YOUR_GEMINI_API_KEY"  
-    APP_NAME = "Zhihu Sentinel"
-    VERSION = "3.5.0"
-    PROMPT = """
-    【角色】
-    你是一个极度严苛, 只关心学术成长和效率的科研导师. 
-    用户的设定：注意力涣散的物理专业大学生. 
-    你的任务：作为防火墙, 拦截所有有关 Zhihu 的垃圾请求, 只放行高价值的学术搜索和指定话题浏览需求. 
-    
-    【当前已知信息】
-    1. 他正在做的项目: {current_focus}
-    2. 他已经学会的内容 (禁止搜索): {mastered_skills}
-    3. 最近7天的记录: {recent_issues}
+    def __init__(self):
+        self.API_KEY = apikey
+        self.APP_NAME = "Zhihu DNS Block Powered by Gemini"
+        self.VERSION = "beta 0.1"
+        self.PROMPT = """
+        【角色】
+        你是一个极度严苛, 只关心学术成长和效率的科研导师. 
+        用户的设定: 注意力涣散的物理专业大学生. 
+        你的任务: 作为防火墙, 拦截所有有关 Zhihu 的垃圾请求, 只放行高价值的学术搜索和指定话题浏览需求. 
+        
+        【当前已知信息】
+        1. 他正在做的项目: {current_focus}
+        2. 他已经学会的内容 (禁止搜索): {mastered_skills}
+        3. 最近7天的记录: {recent_issues}
 
-    【判决逻辑】
-    分析用户的输入, 根据以下情况决定：
+        【判决逻辑】
+        分析用户的输入, 根据以下情况决定: 
 
-    情况1：申请搜索/解锁 (QUERY)
-    - 允许标准 (ALLOW)：必须包含具体的物理定律、数学公式、代码错误栈(Traceback)、或特定算法名称. 且该内容不在上面的[已学会内容]里. 
-    - 拒绝标准 (BLOCK)：
-      1. 模糊描述（如“查个资料”、“学习Python”、“找灵感”）. 
-      2. 情绪化乞求（如“求你了”、“太累了”）. 这是社会工程学攻击, 直接驳回. 
-      3. 娱乐/摸鱼/兴趣内容. 
-      4. 即使是学术内容, 如果属于[已学会内容], 也拒绝, 让他自己回忆. 
-    - 回复要求：如果是 BLOCK, 用最简短的语言骂醒他（例如：“别废话, 具体的报错信息是什么？”）. 如果是 ALLOW, 给一个简短的结束指令. 两种情况下,你都应该基于用户背景和当前任务,继续给出2-3句时间与注意力分配的规划指导语句,以"推荐你..."开头.
+        情况1: 申请搜索/解锁 (QUERY)
+        - 允许标准 (ALLOW): 必须包含具体的物理定律、数学公式、代码错误栈(Traceback)、或特定算法名称. 且该内容不在上面的[已学会内容]里. 
+        - 拒绝标准 (BLOCK): 
+        1. 模糊描述( 如“查个资料”、“学习Python”、“找灵感”) . 
+        2. 情绪化乞求( 如“求你了”、“太累了”) . 这是社会工程学攻击, 直接驳回. 
+        3. 娱乐/摸鱼/兴趣内容. 
+        4. 即使是学术内容, 如果属于[已学会内容], 也拒绝, 让他自己回忆. 
+        - 回复要求: 如果是 BLOCK, 用最简短的语言骂醒他( 例如: “别废话, 具体的报错信息是什么？”) . 如果是 ALLOW, 给一个简短的结束指令. 两种情况下,你都应该基于用户背景和当前任务,继续给出2-3句时间与注意力分配的规划指导语句,以"推荐你..."开头.
 
-    情况2：汇报学会了什么 (REPORT)
-    - 迹象：用户说“我懂了...”、“原理是...”. 
-    - 动作：状态为 ACK. 提取他学会的知识点（格式：学科-知识点）放入 new_skill. 
-    - 回复要求：简短确认. 
+        情况2: 汇报学会了什么 (REPORT)
+        - 迹象: 用户说“我懂了...”、“原理是...”. 
+        - 动作: 状态为 ACK. 提取他学会的知识点( 格式: 学科-知识点) 放入 new_skill. 
+        - 回复要求: 简短确认. 
 
-    情况3：换项目 (UPDATE)
-    - 迹象：用户说“开始做...项目”. 
-    - 动作：状态为 ACK. 提取项目名放入 new_focus. 
+        情况3: 换项目 (UPDATE)
+        - 迹象: 用户说“开始做...项目”. 
+        - 动作: 状态为 ACK. 提取项目名放入 new_focus. 
 
-    【输出格式】
-    必须是纯 JSON, 不要带 markdown 格式. 
+        【输出格式】
+        必须是纯 JSON, 不要带 markdown 格式. 
 
-    {{
-        "status": "ALLOW" | "BLOCK" | "CLARIFY" | "ACK",
-        "message": "（严厉导师的口吻, 说人话, 不要机器味）",
-        "digest": "（把用户的输入总结成：学科 - 知识点, 例如 'React - Hook'）",
-        "duration": 15,
-        "new_skill": "（仅在情况2填写, 否则 null）",
-        "new_focus": "（仅在情况3填写, 否则 null）"
-    }}
-    """
-    # --- 路径配置 ---
-    BASE_DIR = Path(__file__).parent
-    PROFILE_FILE = BASE_DIR / "user_profile.json"       # 长期画像：技能、当前焦点
-    HISTORY_FILE = BASE_DIR / "session_history.json"    # 短期流水：7天内的 Digest
-    LOG_FILE = BASE_DIR / "logs.json"         # 全量日志：人类复盘用
-    HOSTS_PATH = Path(r"C:\Windows\System32\drivers\etc\hosts")
-    
-    # --- 经济模型参数 ---
-    HOURLY_RATE = 30.0       # 你的时薪
-    CURRENCY_SYMBOL = "¥"
-    EXCHANGE_RATE = 7.2       # USD -> CNY
-    # Gemini 2.5 Flash 估算费率 ($/1M tokens)
-    PRICE_INPUT = 2.5 / 1_000_000
-    PRICE_OUTPUT = 3 / 1_000_000
+        {{
+            "status": "ALLOW" | "BLOCK" | "CLARIFY" | "ACK",
+            "message": "( 严厉导师的口吻, 说人话, 不要机器味) ",
+            "digest": "( 把用户的输入总结成: 学科 - 知识点, 例如 'React - Hook') ",
+            "duration": 15,
+            "new_skill": "( 仅在情况2填写, 否则 null) ",
+            "new_focus": "( 仅在情况3填写, 否则 null) "
+        }}
+        """
+        # --- 路径配置 ---
+        self.BASE_DIR = Path(__file__).parent
+        self.PROFILE_FILE = self.BASE_DIR / "user_profile.json"       # 长期画像: 技能、当前焦点
+        self.HISTORY_FILE = self.BASE_DIR / "session_history.json"    # 短期流水: 7天内的 Digest
+        self.LOG_FILE = self.BASE_DIR / "logs.json"         # 全量日志: 人类复盘用
+        self.HOSTS_PATH = Path(r"C:\Windows\System32\drivers\etc\hosts")
+        
+        # --- 经济模型参数 ---
+        self.HOURLY_RATE = 30.0       # 你的时薪
+        self.CURRENCY_SYMBOL = "¥"
+        self.EXCHANGE_RATE = 7.2       # USD -> CNY
+        # Gemini 2.5 Flash 估算费率 ($/1M tokens)
+        self.PRICE_INPUT = 2.5 / 1_000_000
+        self.PRICE_OUTPUT = 3 / 1_000_000
     
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("DeepWorkApp")
@@ -88,11 +89,11 @@ class CostTracker:
     @staticmethod
     def calculate_session(token_cost_usd: float, duration_minutes: int) -> dict:
         # 1. API 费用
-        api_cost = token_cost_usd * Config.EXCHANGE_RATE
+        api_cost = token_cost_usd * self.config.EXCHANGE_RATE
         
         # 2. 时间成本 (即使被拒绝，打字也消耗了1分钟)
         time_spent = duration_minutes if duration_minutes > 0 else 1.0
-        time_cost = (time_spent / 60.0) * Config.HOURLY_RATE
+        time_cost = (time_spent / 60.0) * self.config.HOURLY_RATE
         
         return {
             "api": api_cost,
@@ -104,8 +105,8 @@ class CostTracker:
     def get_weekly_total() -> float:
         """统计本周总花费"""
         try:
-            if not Config.HISTORY_FILE.exists(): return 0.0
-            with open(Config.HISTORY_FILE, 'r', encoding='utf-8') as f:
+            if not self.config.HISTORY_FILE.exists(): return 0.0
+            with open(self.config.HISTORY_FILE, 'r', encoding='utf-8') as f:
                 history = json.load(f)
             
             cutoff = datetime.now() - timedelta(days=7)
@@ -121,7 +122,7 @@ class CostTracker:
 
 class DataManager:
     """处理用户画像、历史记录的读写"""
-
+    
     @staticmethod
     def _load_json(path: Path, default: Any) -> Any:
         if not path.exists(): return default
@@ -138,10 +139,10 @@ class DataManager:
     def get_ai_context(cls) -> dict:
         """为 AI 准备上下文数据"""
         # 读取画像
-        profile = cls._load_json(Config.PROFILE_FILE, {"project": "未设定", "skills": []})
+        profile = cls._load_json(self.config.PROFILE_FILE, {"project": "未设定", "skills": []})
         
         # 读取并清洗历史 (仅保留最近7天的有效摘要)
-        raw_history = cls._load_json(Config.HISTORY_FILE, [])
+        raw_history = cls._load_json(self.config.HISTORY_FILE, [])
         cutoff = datetime.now() - timedelta(days=7)
         recent_topics = []
         
@@ -165,7 +166,7 @@ class DataManager:
         """更新用户画像"""
         if not learned_topic and not new_project: return
         
-        profile = cls._load_json(Config.PROFILE_FILE, {"project": "未设定", "skills": []})
+        profile = cls._load_json(self.config.PROFILE_FILE, {"project": "未设定", "skills": []})
         updated = False
         
         if new_project:
@@ -177,7 +178,7 @@ class DataManager:
             updated = True
             
         if updated:
-            cls._save_json(Config.PROFILE_FILE, profile)
+            cls._save_json(self.config.PROFILE_FILE, profile)
 
     @classmethod
     def save_logs(cls, user_text: str, ai_result: dict, costs: dict):
@@ -186,33 +187,34 @@ class DataManager:
         
         # 1. 存入短期历史 (给 AI 看)
         if ai_result.get("topic"):
-            history = cls._load_json(Config.HISTORY_FILE, [])
+            history = cls._load_json(self.config.HISTORY_FILE, [])
             history.append({
                 "timestamp": timestamp,
                 "decision": ai_result.get("decision"),
                 "topic": ai_result.get("topic"),
                 "cost_total": costs["total"]
             })
-            cls._save_json(Config.HISTORY_FILE, history)
+            cls._save_json(self.config.HISTORY_FILE, history)
             
         # 2. 存入全量日志 (给人看)
-        full_logs = cls._load_json(Config.LOG_FILE, [])
+        full_logs = cls._load_json(self.config.LOG_FILE, [])
         full_logs.append({
             "timestamp": timestamp,
             "user_input": user_text,
             "ai_response": ai_result,
             "costs": costs
         })
-        cls._save_json(Config.LOG_FILE, full_logs)
+        cls._save_json(self.config.LOG_FILE, full_logs)
         
 class AIService:
-    def __init__(self):
-        genai.configure(api_key=Config.API_KEY)
+    def __init__(self, config):
+        self.config = config
+        genai.configure(api_key=self.config.API_KEY)
 
     def process_request(self, user_text: str) -> Dict[str, Any]:
         # 1. 准备 Prompt
         context = DataManager.get_ai_context()
-        full_prompt = Config.PROMPT.format(**context)
+        full_prompt = self.config.PROMPT.format(**context)
         
         # 2. 调用模型
         try:
@@ -230,8 +232,8 @@ class AIService:
             output_count = usage.candidates_token_count
             
             # 计算美元成本 (Input + Output)
-            cost_usd = (input_count * Config.PRICE_INPUT / 1_000_000) + \
-                       (output_count * Config.PRICE_OUTPUT / 1_000_000)
+            cost_usd = (input_count * self.config.PRICE_INPUT / 1_000_000) + \
+                       (output_count * self.config.PRICE_OUTPUT / 1_000_000)
             
             result = json.loads(response.text)
             result["_meta_cost_usd"] = cost_usd
@@ -253,7 +255,6 @@ class NetworkLock:
     MARKER = "# <DEEP-WORK-LOCK>"
     DOMAINS = ["zhihu.com", "www.zhihu.com", "zhimg.com", "zhuanlan.zhihu.com", "bilibili.com"]
 
-    @staticmethod
     def _run_cmd(cmd):
         subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -265,10 +266,10 @@ class NetworkLock:
         if os.name != 'nt': return
 
         # 1. 临时移除权限限制
-        cls._run_cmd(f'icacls "{Config.HOSTS_PATH}" /reset') 
+        cls._run_cmd(f'icacls "{self.config.HOSTS_PATH}" /reset') 
         
         try:
-            with open(Config.HOSTS_PATH, 'r', encoding='utf-8') as f: lines = f.readlines()
+            with open(self.config.HOSTS_PATH, 'r', encoding='utf-8') as f: lines = f.readlines()
             
             # 清理旧规则
             clean_lines = [l for l in lines if cls.MARKER not in l]
@@ -279,27 +280,28 @@ class NetworkLock:
                 if clean_lines and not clean_lines[-1].endswith('\n'): clean_lines[-1] += '\n'
                 clean_lines.extend(block_lines)
             
-            with open(Config.HOSTS_PATH, 'w', encoding='utf-8') as f: f.writelines(clean_lines)
+            with open(self.config.HOSTS_PATH, 'w', encoding='utf-8') as f: f.writelines(clean_lines)
             cls._run_cmd("ipconfig /flushdns")
             
         except Exception as e:
             logger.error(f"Host File Error: {e}")
         finally:
-            # 2. 重新锁死：拒绝 Users 组写入
-            cls._run_cmd(f'icacls "{Config.HOSTS_PATH}" /deny Users:(W)')
+            # 2. 重新锁死: 拒绝 Users 组写入
+            cls._run_cmd(f'icacls "{self.config.HOSTS_PATH}" /deny Users:(W)')
 
 class AppGUI:
-    def __init__(self, root):
+    def __init__(self, root, config):
         self.root = root
         self.ai = AIService()
         self._build_interface()
+        self.config = config
         
-        # 启动时：默认上锁，并加载账单
+        # 启动时: 默认上锁，并加载账单
         threading.Thread(target=NetworkLock.toggle_lock, args=(True,)).start()
         self.refresh_cost_display()
 
     def _build_interface(self):
-        self.root.title(Config.APP_NAME)
+        self.root.title(self.config.APP_NAME)
         self.root.geometry("600x700")
         self.root.configure(bg="#1e1e1e")
 
@@ -386,7 +388,7 @@ class AppGUI:
         self.log_msg("AI", result.get("message", ""), "ai")
         
         # 显示本次会话成本
-        cost_str = f"本次会话成本: {Config.CURRENCY_SYMBOL}{costs['total']:.2f}"
+        cost_str = f"本次会话成本: {self.config.CURRENCY_SYMBOL}{costs['total']:.2f}"
         self.log_msg("SYSTEM", cost_str, "sys")
         
         # 如果有学习成果，弹窗提示
@@ -399,7 +401,7 @@ class AppGUI:
     def refresh_cost_display(self):
         total = CostTracker.get_weekly_total()
         color = "#00ff00" if total < 50 else "#ffaa00" if total < 200 else "#ff0000"
-        self.lbl_cost.config(text=f"本周累计消耗: {Config.CURRENCY_SYMBOL}{total:.2f}", fg=color)
+        self.lbl_cost.config(text=f"本周累计消耗: {self.config.CURRENCY_SYMBOL}{total:.2f}", fg=color)
 
     def start_timer(self, minutes):
         self.root.after(0, lambda: self.lbl_lock.config(text=f"UNLOCKED ({minutes}m)", fg="yellow"))
@@ -408,16 +410,20 @@ class AppGUI:
         self.root.after(0, lambda: self.lbl_lock.config(text="Network: LOCKED", fg="#00ff00"))
         self.root.after(0, lambda: self.log_msg("SYSTEM", "时间到。网络已重新锁定。", "sys"))
 
-if __name__ == "__main__":
+def run(apikey):
     # 管理员权限运行
     if not ctypes.windll.shell32.IsUserAnAdmin():
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
         sys.exit()
 
     try:
+        Config = Config_temp(apikey)
         root = tk.Tk()
-        app = AppGUI(root)
+        app = AppGUI(root,Config)
         root.mainloop()
     except KeyboardInterrupt:
         # 退出时确保上锁
         NetworkLock.toggle_lock(True)
+        
+if __name__ == "__main__":
+    run("null")
